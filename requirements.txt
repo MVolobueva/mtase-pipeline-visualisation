@@ -1,2 +1,5 @@
 streamlit
 pandas
+ipython_genutils
+stmol
+py3Dmol
