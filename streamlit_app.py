@@ -1,281 +1,155 @@
-from collections import defaultdict
-from pathlib import Path
-import sqlite3
-
+### Step 1) Imports
+import stmol
 import streamlit as st
-import altair as alt
+import py3Dmol
+from stmol import showmol
 import pandas as pd
 
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='Inventory tracker',
-    page_icon=':shopping_bags:', # This is an emoji shortcode. Could be a URL too.
-)
+#color MTase chain in red
+def color_MTase(df):
+    MTasechain = {'chain':hl_chain}
+    view.setStyle(MTasechain,{'cartoon':{'color':'blue'}})
+    #view.addResLabels({"chain": hl_chain,"resi": 1-10})
+
+    a = tuple(df[df['REBASE_name'] == option].iloc[0]['Region_coords'].split(','))
+    b = tuple(df[df['REBASE_name'] == option].iloc[0]['Regions'].split(','))
+    i1 = 0
+
+    l1 = ''
+    if hl_chain:
+        for i,l in zip(a,b):
+            if i1 != 0 and i1+1 < int(i.split('-')[0]) and l1 != 'sam_motif' and l1 != 'cat_motif':
+
+                for k in range(i1+1, int(i.split('-')[0])):
+                    view.setStyle({'resi': k, 'chain': hl_chain}, {'cartoon': {'color': 'green'}})
+
+            if l == 'sam_motif' or l == 'cat_motif':
+
+                for k in range(int(i.split('-')[0]), int(i.split('-')[1]) + 1):
+                    view.setStyle({'resi': k, 'chain': hl_chain}, {'cartoon': {'color': 'red'}})
+            else:
+                for k in range(int(i.split('-')[0]), int(i.split('-')[1]) + 1):
+                    view.setStyle({'resi': k, 'chain': hl_chain}, {'cartoon': {'color': 'yellow'}})
+            i1 = int(i.split('-')[1])
+            l1 =  l
+    else:
+            st.error("Please paste chain")
 
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+#original
+st.sidebar.title("Settings")
 
-def connect_db():
-    '''Connects to the sqlite database.'''
+uploaded_file = st.sidebar.file_uploader("Choose a file with MTase classes\
+    from [MTase classification pipline](https://github.com/MVolobueva/MTase-classification/blob/main/Classification_pipeline.ipynb)")
+uploaded_file_pdb = st.sidebar.file_uploader("Choose PBD file")
+st.markdown(
+    f"# DNA-methyltransferases (MTases) classes")
+option = 'M.HhaI'
+k = 1
+if uploaded_file is not None:
+    k = 0
+    df = pd.read_csv(uploaded_file, sep = '\t', index_col=0)
+    option = st.selectbox(
+    'What MTase would you like to analyse?',
+    df['REBASE_name'],
+    index=None)
+    if not option:
+        st.error("Please choose MTase")
+    else:
+        st.write('You selected:', option)
+        st.write(df[df['REBASE_name'] == option][['REBASE_name', 'New_class', 'Regions', 'Region_coords']])
+    pdb_code = st.sidebar.text_input(
+        label="PDB Code")
+    if not pdb_code and uploaded_file_pdb is None:
+        st.sidebar.error("Please paste PDB code or paste PDB file")
+    else:
+        k=1
 
-    DB_FILENAME = Path(__file__).parent/'inventory.db'
-    db_already_exists = DB_FILENAME.exists()
+        hl_chain = st.sidebar.text_input(label="Choose MTase chain")
 
-    conn = sqlite3.connect(DB_FILENAME)
-    db_was_just_created = not db_already_exists
+        hl_resi_list = st.sidebar.multiselect(label="Highlight Residues", options=list(range(1, 5000)))
 
-    return conn, db_was_just_created
+        label_resi = st.sidebar.checkbox(label="Label Residues", value=True)
 
+        surf_transp = st.sidebar.slider("Surface Transparency", min_value=0.0, max_value=1.0, value=0.0)
 
-def initialize_data(conn):
-    '''Initializes the inventory table with some data.'''
-    cursor = conn.cursor()
+        hl_color = st.sidebar.text_input(label="Highlight Color",value="red")
 
-    cursor.execute(
-        '''
-        CREATE TABLE IF NOT EXISTS inventory (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_name TEXT,
-            price REAL,
-            units_sold INTEGER,
-            units_left INTEGER,
-            cost_price REAL,
-            reorder_point INTEGER,
-            description TEXT
-        )
-        '''
-    )
-
-    cursor.execute(
-        '''
-        INSERT INTO inventory
-            (item_name, price, units_sold, units_left, cost_price, reorder_point, description)
-        VALUES
-            -- Beverages
-            ('Bottled Water (500ml)', 1.50, 115, 15, 0.80, 16, 'Hydrating bottled water'),
-            ('Soda (355ml)', 2.00, 93, 8, 1.20, 10, 'Carbonated soft drink'),
-            ('Energy Drink (250ml)', 2.50, 12, 18, 1.50, 8, 'High-caffeine energy drink'),
-            ('Coffee (hot, large)', 2.75, 11, 14, 1.80, 5, 'Freshly brewed hot coffee'),
-            ('Juice (200ml)', 2.25, 11, 9, 1.30, 5, 'Fruit juice blend'),
-
-            -- Snacks
-            ('Potato Chips (small)', 2.00, 34, 16, 1.00, 10, 'Salted and crispy potato chips'),
-            ('Candy Bar', 1.50, 6, 19, 0.80, 15, 'Chocolate and candy bar'),
-            ('Granola Bar', 2.25, 3, 12, 1.30, 8, 'Healthy and nutritious granola bar'),
-            ('Cookies (pack of 6)', 2.50, 8, 8, 1.50, 5, 'Soft and chewy cookies'),
-            ('Fruit Snack Pack', 1.75, 5, 10, 1.00, 8, 'Assortment of dried fruits and nuts'),
-
-            -- Personal Care
-            ('Toothpaste', 3.50, 1, 9, 2.00, 5, 'Minty toothpaste for oral hygiene'),
-            ('Hand Sanitizer (small)', 2.00, 2, 13, 1.20, 8, 'Small sanitizer bottle for on-the-go'),
-            ('Pain Relievers (pack)', 5.00, 1, 5, 3.00, 3, 'Over-the-counter pain relief medication'),
-            ('Bandages (box)', 3.00, 0, 10, 2.00, 5, 'Box of adhesive bandages for minor cuts'),
-            ('Sunscreen (small)', 5.50, 6, 5, 3.50, 3, 'Small bottle of sunscreen for sun protection'),
-
-            -- Household
-            ('Batteries (AA, pack of 4)', 4.00, 1, 5, 2.50, 3, 'Pack of 4 AA batteries'),
-            ('Light Bulbs (LED, 2-pack)', 6.00, 3, 3, 4.00, 2, 'Energy-efficient LED light bulbs'),
-            ('Trash Bags (small, 10-pack)', 3.00, 5, 10, 2.00, 5, 'Small trash bags for everyday use'),
-            ('Paper Towels (single roll)', 2.50, 3, 8, 1.50, 5, 'Single roll of paper towels'),
-            ('Multi-Surface Cleaner', 4.50, 2, 5, 3.00, 3, 'All-purpose cleaning spray'),
-
-            -- Others
-            ('Lottery Tickets', 2.00, 17, 20, 1.50, 10, 'Assorted lottery tickets'),
-            ('Newspaper', 1.50, 22, 20, 1.00, 5, 'Daily newspaper')
-        '''
-    )
-    conn.commit()
+        bb_color = st.sidebar.text_input(label="Backbone Color",value="lightgrey")
+        lig_color = st.sidebar.text_input(label="Ligand Color",value="white")
 
 
-def load_data(conn):
-    '''Loads the inventory data from the database.'''
-    cursor = conn.cursor()
+        st.markdown(
+            f"## MTase {option} from class {df[df['REBASE_name'] == option].iloc[0]['New_class']}: PDB [{pdb_code.upper()}](https://www.rcsb.org/structure/{pdb_code}) (Chain {hl_chain})")
+else:
+    df = pd.read_csv('./class_withStructure1.tsv', sep='\t', index_col=0)
+    st.write('## Prokaryotic MTases with available 3D structure')
+    option = st.selectbox(
+        'What MTase would you like to analyse?',
+        df['REBASE_name'],
+        index= 1)
+    st.write(df[df['REBASE_name'] == option][['REBASE_name', 'New_class', 'Repr. PDB code', 'Regions', 'Region_coords']].style.format({"Expense": lambda x : '{:.4f}'.format(x)}))
+    pdb_code = st.sidebar.text_input(
+        label="PDB Code",
+        value= df[df['REBASE_name'] == option].iloc[0]['Repr. PDB code'])
 
-    try:
-        cursor.execute('SELECT * FROM inventory')
-        data = cursor.fetchall()
-    except:
-        return None
+    hl_chain = st.sidebar.text_input(label="Choose MTase chain", value="A")
 
-    df = pd.DataFrame(data,
-        columns=[
-            'id',
-            'item_name',
-            'price',
-            'units_sold',
-            'units_left',
-            'cost_price',
-            'reorder_point',
-            'description',
-        ])
+    hl_resi_list = st.sidebar.multiselect(label="Highlight Residues", options=list(range(1, 5000)))
 
-    return df
+    label_resi = st.sidebar.checkbox(label="Label Residues", value=True)
 
+    surf_transp = st.sidebar.slider("Surface Transparency", min_value=0.0, max_value=1.0, value=0.0)
 
-def update_data(conn, df, changes):
-    '''Updates the inventory data in the database.'''
-    cursor = conn.cursor()
+    hl_color = st.sidebar.text_input(label="Highlight Color",value="red")
 
-    if changes['edited_rows']:
-        deltas = st.session_state.inventory_table['edited_rows']
-        rows = []
-
-        for i, delta in deltas.items():
-            row_dict = df.iloc[i].to_dict()
-            row_dict.update(delta)
-            rows.append(row_dict)
-
-        cursor.executemany(
-            '''
-            UPDATE inventory
-            SET
-                item_name = :item_name,
-                price = :price,
-                units_sold = :units_sold,
-                units_left = :units_left,
-                cost_price = :cost_price,
-                reorder_point = :reorder_point,
-                description = :description
-            WHERE id = :id
-            ''',
-            rows,
-        )
-
-    if changes['added_rows']:
-        cursor.executemany(
-            '''
-            INSERT INTO inventory
-                (id, item_name, price, units_sold, units_left, cost_price, reorder_point, description)
-            VALUES
-                (:id, :item_name, :price, :units_sold, :units_left, :cost_price, :reorder_point, :description)
-            ''',
-            (defaultdict(lambda: None, row) for row in changes['added_rows']),
-        )
-
-    if changes['deleted_rows']:
-        cursor.executemany(
-            'DELETE FROM inventory WHERE id = :id',
-            ({'id': int(df.loc[i, 'id'])} for i in changes['deleted_rows'])
-        )
-
-    conn.commit()
+    bb_color = st.sidebar.text_input(label="Backbone Color",value="lightgrey")
+    lig_color = st.sidebar.text_input(label="Ligand Color",value="white")
 
 
-# -----------------------------------------------------------------------------
-# Draw the actual page, starting with the inventory table.
-
-# Set the title that appears at the top of the page.
-'''
-# :shopping_bags: Inventory tracker
-
-**Welcome to Alice's Corner Store's intentory tracker!**
-This page reads and writes directly from/to our inventory database.
-'''
-
-st.info('''
-    Use the table below to add, remove, and edit items.
-    And don't forget to commit your changes when you're done.
-    ''')
-
-# Connect to database and create table if needed
-conn, db_was_just_created = connect_db()
-
-# Initialize data.
-if db_was_just_created:
-    initialize_data(conn)
-    st.toast('Database initialized with some sample data.')
-
-# Load data from database
-df = load_data(conn)
-
-# Display data with editable table
-edited_df = st.data_editor(
-    df,
-    disabled=['id'], # Don't allow editing the 'id' column.
-    num_rows='dynamic', # Allow appending/deleting rows.
-    column_config={
-        # Show dollar sign before price columns.
-        "price": st.column_config.NumberColumn(format="$%.2f"),
-        "cost_price": st.column_config.NumberColumn(format="$%.2f"),
-    },
-    key='inventory_table')
-
-has_uncommitted_changes = any(len(v) for v in st.session_state.inventory_table.values())
-
-st.button(
-    'Commit changes',
-    type='primary',
-    disabled=not has_uncommitted_changes,
-    # Update data in database
-    on_click=update_data,
-    args=(conn, df, st.session_state.inventory_table))
+    st.markdown(
+        f"## MTase {option} from class {df[df['REBASE_name'] == option].iloc[0]['New_class']}: PDB [{pdb_code.upper()}](https://www.rcsb.org/structure/{pdb_code}) (Chain {hl_chain})")
 
 
-# -----------------------------------------------------------------------------
-# Now some cool charts
+### Step 3) Py3Dmol
 
-# Add some space
-''
-''
-''
+width = 700
+height = 700
 
-st.subheader('Units left', divider='red')
+cartoon_radius = 0.2
+stick_radius = 0.2
 
-need_to_reorder = df[df['units_left'] < df['reorder_point']].loc[:, 'item_name']
+if k!= 0:
+    st.write('MTase chain is green. Sam-motif and cat-motif are red.\
+     Elements detected by hmm-profiles are yellow.\
+     Loops between detected elements are green.')
+    if uploaded_file_pdb is not None and not pdb_code:
+        view = stmol.obj_upload(uploaded_file_pdb)
+    else:
+        view = py3Dmol.view(query=f"pdb:{pdb_code.lower()}", width=width, height=height)
 
-if len(need_to_reorder) > 0:
-    items = '\n'.join(f'* {name}' for name in need_to_reorder)
+    view.setStyle({"cartoon": {"style": "oval","color": bb_color,"thickness": cartoon_radius}})
 
-    st.error(f"We're running dangerously low on the items below:\n {items}")
+    view.addSurface(py3Dmol.VDW, {"opacity": surf_transp, "color": bb_color},{"hetflag": False})
 
-''
-''
+    view.addStyle({"elem": "C", "hetflag": True},
+                    {"stick": {"color": lig_color, "radius": stick_radius}})
 
-st.altair_chart(
-    # Layer 1: Bar chart.
-    alt.Chart(df)
-        .mark_bar(
-            orient='horizontal',
-        )
-        .encode(
-            x='units_left',
-            y='item_name',
-        )
-    # Layer 2: Chart showing the reorder point.
-    + alt.Chart(df)
-        .mark_point(
-            shape='diamond',
-            filled=True,
-            size=50,
-            color='salmon',
-            opacity=1,
-        )
-        .encode(
-            x='reorder_point',
-            y='item_name',
-        )
-    ,
-    use_container_width=True)
+    view.addStyle({"hetflag": True},
+                        {"stick": {"radius": stick_radius}})
 
-st.caption('NOTE: The :diamonds: location shows the reorder point.')
+    for hl_resi in hl_resi_list:
+        view.addStyle({"chain": hl_chain, "resi": hl_resi, "elem": "C"},
+                        {"stick": {"color": hl_color, "radius": stick_radius}})
 
-''
-''
-''
+        view.addStyle({"chain": hl_chain, "resi": hl_resi},
+                            {"stick": {"radius": stick_radius}})
 
-# -----------------------------------------------------------------------------
+    if label_resi:
+        for hl_resi in hl_resi_list:
+            view.addResLabels({"chain": hl_chain,"resi": hl_resi},
+            {"backgroundColor": "lightgray","fontColor": "black","backgroundOpacity": 0.5})
+    color_MTase(df)
 
-st.subheader('Best sellers', divider='orange')
-
-''
-''
-
-st.altair_chart(alt.Chart(df)
-    .mark_bar(orient='horizontal')
-    .encode(
-        x='units_sold',
-        y=alt.Y('item_name').sort('-x'),
-    ),
-    use_container_width=True)
+    showmol(view, height=height, width=width)
